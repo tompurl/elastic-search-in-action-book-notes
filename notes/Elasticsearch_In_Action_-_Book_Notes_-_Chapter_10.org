@@ -1,0 +1,26 @@
+#+SETUPFILE: static/org-html-themes/setup/theme-bigblow.setup
+#+TITLE: Elasticsearch In Action - Book Notes - Chapter 10
+#+PROPERTY: header-args :eval never-export :exports code
+
+* Navigation
+
+- [[file:Elasticsearch_In_Action_-_Book_Notes.org][Elasticsearch In Action - Book Notes]] (Top)
+- [[file:Elasticsearch_In_Action_-_Book_Notes_-_Chapter_9.org][Elasticsearch In Action - Book Notes - Chapter 9]] (Back)
+- [[file:Elasticsearch_In_Action_-_Book_Notes_-_Chapter_11.org][Elasticsearch In Action - Book Notes - Chapter 11]] (Forward)
+
+* Boilerplate Code
+
+Please see the [[file:Elasticsearch_In_Action_-_Book_Notes_-_Chapter_3.org::*Notes%20On%20Code%20Examples][Notes On Code Examples]] section in Chapter 3 for
+more information.
+
+#+name: request_boilerplate
+#+BEGIN_SRC python
+import os, requests
+os.environ['NO_PROXY'] = 'localhost'
+
+#+END_SRC
+
+
+* Chapter 10 - Improving performance
+
+I think this is another chapter that I will come back to later.

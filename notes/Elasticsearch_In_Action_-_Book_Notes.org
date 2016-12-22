@@ -1,0 +1,151 @@
+#+SETUPFILE: static/org-html-themes/setup/theme-bigblow.setup
+#+TITLE: Elasticsearch In Action - Book Notes
+#+PROPERTY: header-args :eval never-export
+
+* Document Links
+- https://www.safaribooksonline.com/library/view/elasticsearch-in-action/9781617291623/
+- [[file:Elasticsearch_Cheat_Sheet.org][Elasticsearch Cheat Sheet]]
+
+* Notes
+
+- [[file:Elasticsearch_In_Action_-_Book_Notes_-_Chapter_1.org][Elasticsearch In Action - Book Notes - Chapter 1]]
+- [[file:Elasticsearch_In_Action_-_Book_Notes_-_Chapter_2.org][Elasticsearch In Action - Book Notes - Chapter 2]]
+- [[file:Elasticsearch_In_Action_-_Book_Notes_-_Chapter_3.org][Elasticsearch In Action - Book Notes - Chapter 3]]
+- [[file:Elasticsearch_In_Action_-_Book_Notes_-_Chapter_4.org][Elasticsearch In Action - Book Notes - Chapter 4]]
+...
+- [[file:Elasticsearch_In_Action_-_Book_Notes_-_Chapter_9.org][Elasticsearch In Action - Book Notes - Chapter 9]]
+- [[file:Elasticsearch_In_Action_-_Book_Notes_-_Chapter_10.org][Elasticsearch In Action - Book Notes - Chapter 10]]
+- [[file:Elasticsearch_In_Action_-_Book_Notes_-_Chapter_11.org][Elasticsearch In Action - Book Notes - Chapter 11]]
+
+* Notes on code examples
+
+Here's my [[file:Elasticsearch_In_Action_-_Book_Notes_-_Chapter_3.org::*Notes%20On%20Code%20Examples][Notes On Code Examples]], and here's the boilerplate code:
+
+#+name: request_boilerplate
+#+BEGIN_SRC python
+import os, requests
+os.environ['NO_PROXY'] = 'localhost'
+
+#+END_SRC
+
+* Setup Notes
+
+Here's the high-level step for setting everything up on Windows. Most
+of these steps are in the book, but I wanted a quick checklist:
+
+1. Unzip the Elasticsearch zip file.
+2. Set your =%ES_JAVA_OPTS%= environment var to the following value:
+   1. =-Dhttp.proxyHost=some.proxy.com -Dhttp.proxyPort=8080 -Dhttps.proxyHost=some.proxy.com -Dhttps.proxyPort=8080=
+   2. You only have to do this once.
+3. Install kopf
+   1. cd to =$elasticsearch_home\bin=
+   2. =plugin install lmenezes/elasticsearch-kopf/1.0=
+4. Make the following changes in =config/elasticsearch.yml=:
+   1. Set the =network.host= prop to =127.0.0.1=
+   2. Set some value for the =cluster.name= property.
+      1. I use =tom-purls-test=
+   3. Set =script.disable_dynamic= to =false=.
+5. Start your server.
+6. Download the book's code (which you also only need to do once).
+
+The script to populate your server is written in Bash, so you'll
+need to run these commands from Cygwin if you're using Windows:
+
+#+BEGIN_EXAMPLE
+
+$ cd elasticsearch-in-action-master
+$ ./populate.sh
+
+#+END_EXAMPLE
+
+* Backups (Optional)
+
+I got a BSOD while going through one of the chapters in this book and
+my database was corrupted as a result. I probably could have fixed it
+by hand, but this was also a good time for me to learn about the
+basics of backups.
+
+I think it's smart to backup all of your data after completing every
+chapter, just in case, and it's also a good learning exercise.
+
+** Setup
+1. Set the =path.repo= value in the =elasticsearch.yml= file.
+   1. This is the parent folder of the folder that will contain
+      your backup snapshots. You only have to set this value if you
+      want to take backups.
+   2. I use =["d:/myshare/tom/Elasticsearch-test"]=
+2. After creating this folder, create a =snapshots= folder
+   underneath it.
+3. Finally, create the backup repository. Please note that this folder
+   has to be accessible to every node in your cluster:
+
+#+BEGIN_SRC python :results output silent :noweb yes
+  <<request_boilerplate>>
+  url = 'http://localhost:9200/_snapshot/my_repository'
+  define_new_backup_repo = '''
+  {
+    "type" : "fs",
+    "settings" : {
+      "location" : "d:/myshare/tom/Elasticsearch-test/snapshots",
+      "compress" : true,
+      "max_snapshot_bytes_per_sec" : "20mb",
+      "max_restore_bytes_per_sec" : "20mb"
+    }
+  }
+  '''
+  r = requests.put(url, data = define_new_backup_repo)
+  print r.text 
+#+END_SRC
+
+** Creating A Snapshot
+
+After completing some sort of milestone you can create a snapshot of
+your data like this:
+
+#+BEGIN_SRC python :results output silent :noweb yes
+  <<request_boilerplate>>
+
+  # Generate a snapshot name because I'm lazy
+  import datetime
+  snapshot_name = datetime.datetime.today().strftime('%Y-%m-%d-%H%M%S-snapshot') 
+
+  url = 'http://localhost:9200/_snapshot/my_repository/' + snapshot_name
+  payload = {'wait_for_completion': True}
+  r = requests.put(url, params = payload)
+  print r.text 
+#+END_SRC
+
+** Restore
+
+Let's assume that you want to start over with a particular snapshot.
+
+1. First, I'm going to shut down all of my app servers.
+2. Next, I'm going to delete all of my data (i.e. my
+   =c:\Users\tom\Documents\td\apps\elasticsearch-1.7.6\data\tom-purls-test\=
+   folder).
+3. Now I'll start my cluster again.
+4. If I was restoring from "bare metal" at this point I would need to
+   set the =path.repo= value again.
+5. Create the =my_repository= repository.
+   1. You have to do this even if you're not restoring from bare metal.
+   2. This is from [[*Setup][Setup section]] above.
+6. Find the snapshot that you want to restore
+   1. You can find these under the =snapshots= folder that you created
+      above.
+   2. You should see files with names like
+      =snapshot-YOUR_SNAPSHOT_NAME=. Simply specify one of the
+      =YOUR_SNAPSHOT_NAME= values.
+7. Finally, you can restore with code that looks a lot like this after
+   you replace the =TODO= string with an actual snapshot name:
+
+#+BEGIN_SRC python :results output silent :noweb yes
+  <<request_boilerplate>>
+  url = 'http://localhost:9200/_snapshot/my_repository/TODO/_restore'
+  r = requests.post(url)
+  print r.text 
+#+END_SRC
+
+* Chapter Order And Skipping
+
+I may skip some of the chapters in this book based on applicability
+to my needs, and I don't promise to read them in order :-) 

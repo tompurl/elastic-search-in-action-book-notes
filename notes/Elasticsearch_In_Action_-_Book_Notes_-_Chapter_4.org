@@ -1,0 +1,11 @@
+#+SETUPFILE: static/org-html-themes/setup/theme-bigblow.setup
+#+TITLE: Elasticsearch In Action - Book Notes - Chapter 4
+#+PROPERTY: header-args :eval never-export :exports code
+
+* Navigation
+
+- [[file:Elasticsearch_In_Action_-_Book_Notes.org][Elasticsearch In Action - Book Notes]] (Top)
+- [[file:Elasticsearch_In_Action_-_Book_Notes_-_Chapter_3.org][Elasticsearch In Action - Book Notes - Chapter 3]] (Back)
+- [[file:Elasticsearch_In_Action_-_Book_Notes_-_Chapter_5.org][Elasticsearch In Action - Book Notes - Chapter 5]] (Forward)
+
+* Chapter 4 - Searching Your Data

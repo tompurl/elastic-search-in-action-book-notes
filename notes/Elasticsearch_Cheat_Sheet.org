@@ -1,0 +1,81 @@
+#+SETUPFILE: static/org-html-themes/setup/theme-bigblow.setup
+#+TITLE: Elasticsearch Cheat Sheet
+#+PROPERTY: header-args :eval never-export
+
+* Queries
+
+Search all types in an index with a term:
+
+#+BEGIN_SRC python
+  url = 'http://localhost:9200/get-together/_search'
+  payload = {'q': "sample", 'pretty': True }
+  r = requests.get(url, params=payload)
+  print r.text
+#+END_SRC
+
+* Health Checks
+
+Check health of cluster:
+
+#+BEGIN_SRC python
+  url = 'http://localhost:9200/_cluster/health'
+  payload = {'pretty': True}
+  r = requests.get(url, params = payload)
+  print r.text 
+#+END_SRC
+
+Check stats on your nodes:
+
+#+BEGIN_SRC python
+  url = 'http://localhost:9200/_nodes'
+  payload = {'pretty': True}
+  r = requests.get(url, params = payload)
+  print r.text 
+#+END_SRC
+
+* Corruption Recovery
+
+Today when I tried starting my first Elasticsearch node after a laptop
+restart I got the following fatal error:
+
+#+BEGIN_EXAMPLE
+
+...
+[2016-12-14 09:48:48,097][WARN ][script                   ] [Derrick Slegers Speed] deprecated setting [script.disable_dynamic] is set, replace with fine-grained scripting settings (e.g. script.inline, script.indexed, script.file)
+[2016-12-14 09:48:48,257][ERROR][gateway.local.state.shards] [Derrick Slegers Speed] failed to read local state (started shards), exiting...
+org.elasticsearch.ElasticsearchException: codec footer mismatch: actual footer=253072024 vs expected footer=-1071082520 (resource: BufferedChecksumIndexInput(SimpleFSIndexInput(path="C:\Users\tom\Documents\td\apps\elasticsearch-1.7.6\data\tom-purls-test\nodes\0\indices\december_2014_invoices\2\_state\state-6.st")))
+...
+Caused by: org.elasticsearch.gateway.local.state.meta.CorruptStateException: codec footer mismatch: actual footer=253072024 vs expected footer=-1071082520 (resource: BufferedChecksumIndexInput(SimpleFSIndexInput(path="C:\Users\tom\Documents\td\apps\elasticsearch-1.7.6\data\tom-purls-test\nodes\0\indices\december_2014_invoices\2\_state\state-6.st")))
+...
+[2016-12-14 09:48:48,340][ERROR][gateway.local.state.shards] [Derrick Slegers Speed] failed to read local state (started shards), exiting...
+org.elasticsearch.ElasticsearchException: codec footer mismatch: actual footer=253072024 vs expected footer=-1071082520 (resource: BufferedChecksumIndexInput(SimpleFSIndexInput(path="C:\Users\tom\Documents\td\apps\elasticsearch-1.7.6\data\tom-purls-test\nodes\0\indices\december_2014_invoices\2\_state\state-6.st")))
+...
+Caused by: org.elasticsearch.gateway.local.state.meta.CorruptStateException: codec footer mismatch: actual footer=253072024 vs expected footer=-1071082520 (resource: BufferedChecksumIndexInput(SimpleFSIndexInput(path="C:\Users\tom\Documents\td\apps\elasticsearch-1.7.6\data\tom-purls-test\nodes\0\indices\december_2014_invoices\2\_state\state-6.st")))
+...
+[2016-12-14 09:48:48,354][ERROR][gateway.local.state.shards] [Derrick Slegers Speed] failed to read local state (started shards), exiting...
+org.elasticsearch.ElasticsearchException: codec footer mismatch: actual footer=253072024 vs expected footer=-1071082520 (resource: BufferedChecksumIndexInput(SimpleFSIndexInput(path="C:\Users\tom\Documents\td\apps\elasticsearch-1.7.6\data\tom-purls-test\nodes\0\indices\december_2014_invoices\2\_state\state-6.st")))
+...
+Caused by: org.elasticsearch.gateway.local.state.meta.CorruptStateException: codec footer mismatch: actual footer=253072024 vs expected footer=-1071082520 (resource: BufferedChecksumIndexInput(SimpleFSIndexInput(path="C:\Users\tom\Documents\td\apps\elasticsearch-1.7.6\data\tom-purls-test\nodes\0\indices\december_2014_invoices\2\_state\state-6.st")))
+...
+{1.7.6}: Initialization Failed ...
+1) ElasticsearchException[codec footer mismatch: actual footer=253072024 vs expected footer=-1071082520 (resource: BufferedChecksumIndexInput(SimpleFSIndexInput(path="C:\Users\tom\Documents\td\apps\elasticsearch-1.7.6\data\tom-purls-test\nodes\0\indices\december_2014_invoices\2\_state\state-6.st")))]
+        CorruptStateException[codec footer mismatch: actual footer=253072024 vs expected footer=-1071082520 (resource: BufferedChecksumIndexInput(SimpleFSIndexInput(path="C:\Users\tom\Documents\td\apps\elasticsearch-1.7.6\data\tom-purls-test\nodes\0\indices\december_2014_invoices\2\_state\state-6.st")))]
+
+#+END_EXAMPLE
+
+According to [[https://github.com/elastic/elasticsearch/issues/8707][this link]] I can fix this by doing the following:
+
+1. Delete the bad shard from disk, which is this case would be the
+   =C:\Users\tom\Documents\td\apps\elasticsearch-1.7.6\data\tom-purls-test\nodes\0\indices\december_2014_invoices\2=
+   folder.
+2. Start my system.
+3. Perform a POST on the following URL:
+   1. =localhost:9200/_cluster/reroute=
+
+Ok, at step #2 above I'm now getting the fatal same error on the following index:
+
+- =C:\Users\tom\Documents\td\apps\elasticsearch-1.7.6\data\tom-purls-test\nodes\0\indices\november_2014_invoices\2\_state\state-1.st=
+
+I'm going to try deleting that one too.
+
+Ok, getting a new similar error. I seem to be super broken. Time to learn how to do backups :-) 

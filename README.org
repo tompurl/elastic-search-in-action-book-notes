@@ -1,0 +1,6 @@
+#+SETUPFILE: static/org-html-themes/setup/theme-bigblow.setup
+#+TITLE: README
+
+These are simply my notes from reading the book "Elasticsearch In
+Action". Please note that the images are from the book and are not
+owned by me. I include them here as references.

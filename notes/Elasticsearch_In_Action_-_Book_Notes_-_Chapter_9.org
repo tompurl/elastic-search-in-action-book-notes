@@ -1,0 +1,1001 @@
+#+SETUPFILE: static/org-html-themes/setup/theme-bigblow.setup
+#+TITLE: Elasticsearch In Action - Book Notes - Chapter 9
+#+PROPERTY: header-args :eval never-export :exports code
+
+* Navigation
+
+- [[file:Elasticsearch_In_Action_-_Book_Notes.org][Elasticsearch In Action - Book Notes]] (Top)
+- [[file:Elasticsearch_In_Action_-_Book_Notes_-_Chapter_8.org][Elasticsearch In Action - Book Notes - Chapter 8]] (Back)
+- [[file:Elasticsearch_In_Action_-_Book_Notes_-_Chapter_10.org][Elasticsearch In Action - Book Notes - Chapter 10]] (Forward)
+
+* Boilerplate Code
+
+Please see the [[file:Elasticsearch_In_Action_-_Book_Notes_-_Chapter_3.org::*Notes%20On%20Code%20Examples][Notes On Code Examples]] section in Chapter 3 for
+more information.
+
+#+name: request_boilerplate
+#+BEGIN_SRC python
+import os, requests
+os.environ['NO_PROXY'] = 'localhost'
+
+#+END_SRC
+
+* Chapter 9 - Scaling Out
+
+** 9.1 - Adding nodes to your Elasticsearch cluster
+
+Here's how you can view the health of your cluster:
+
+#+BEGIN_SRC python :exports both :results output :noweb yes
+  <<request_boilerplate>>
+  url = 'http://localhost:9200/_cluster/health'
+  payload = {'pretty': True}
+  r = requests.get(url, params = payload)
+  print r.text 
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+{
+  "cluster_name" : "tom-purls-test",
+  "status" : "green",
+  "timed_out" : false,
+  "number_of_nodes" : 3,
+  "number_of_data_nodes" : 3,
+  "active_primary_shards" : 17,
+  "active_shards" : 34,
+  "relocating_shards" : 0,
+  "initializing_shards" : 0,
+  "unassigned_shards" : 0,
+  "delayed_unassigned_shards" : 0,
+  "number_of_pending_tasks" : 0,
+  "number_of_in_flight_fetch" : 0
+}
+
+#+end_example
+
+When you add a new node Elasticsearch tries to balance them
+out equally.
+
+You can't store the primary and replica for the same shard 
+in the same "node". However, please note that you can store
+them on the same disk.
+
+** 9.2 - Discovering other Elasticsearch nodes
+
+Nodes can discover each other using one of the following:
+
+- Multicast
+  - Requires UDP
+- Unicast
+
+*** 9.2.1 - Multicast discovery
+
+The default address is *224.2.2.4* and the port is *54328*.
+
+Works great but can be chaotic.
+
+*** 9.2.2 - Unicast discovery
+
+Better when:
+
+- The IP addresses don't change frequently
+- Only certain nodes should be communicated with
+
+The nodes will "gossip" in this configuration, because
+each node will tell any requesting nodes about the ones
+it is aware of. 
+
+Man that's was an ugly sentence :-) 
+
+*** 9.2.3 - Electing a master node and detecting faults
+
+Once the nodes have discovered each other the will negotiate who
+becomes the master, which manages the *state*, which is comprised
+of:
+
+- Current setting
+- State of shards, indices and nodes
+
+You should set a value for the the =minimum_master_nodes=
+property. This setting tells Elasticsearch how many nodes you need for
+your cluster to be in a healthy state. The common rule for calculating
+this number is =((number of nodes / 2) + 1)=.
+
+**** What Is split brain?
+
+This is an issue where some Elasticsearch nodes elect a new master
+because they lose contact with the "real" master. So you basically get
+two versions of the same cluster working independently.
+
+Setting the =minimum_master_nodes= setting helps avoids this issue 
+because a at least that number of nodes would have to lose contact 
+with the "real" master before a duplicate master is elected.
+
+Now let's see who the master is:
+
+#+BEGIN_SRC python :exports both :results output :noweb yes
+  <<request_boilerplate>>
+  url = 'http://localhost:9200/_cluster/state/master_node,nodes'
+  payload = {'pretty': True}
+  r = requests.get(url, params = payload)
+  print r.text 
+#+END_SRC
+
+*** 9.2.4 - Fault Detection
+
+This is the process by which your nodes ensure that the other nodes
+are OK. There are two basic "pings":
+
+1. The master pings all of the nodes to make sure they're ok
+2. The non-master nodes ping the master to see if another master
+   election is necessary.
+
+Related properties:
+
+- =discovery.zen.fd.ping_interval=
+- =discovery.zen.fd.ping_timeout=
+- =discovery.zen.fd.ping_retries=
+
+** 9.3 - Removing nodes from a cluster
+
+I fired up 3 nodes for this section.
+
+What happens when I shut down a node in a three-node topology?
+
+1. Some replicas will be switched to primaries
+2. Now some shards will not have replicas, so those are created.
+
+Before these steps are completed the cluster is said to be in a
+*yellow* state. After they are complete it is back in a *green* state.
+
+Assuming that you have enough nodes the system will be available
+while this process occurs.
+
+*** 9.3.1 - Decommissioning nodes
+
+It is also possible to remove a node without putting your cluster into
+a yellow state. You do this by telling the cluster not to allocate any
+shards to one or more nodes. Here's an example:
+
+#+BEGIN_EXAMPLE
+  curl -XPUT localhost:9300/_cluster/settings -d '{
+      "transient" : {
+          "cluster.routing.allocation.exclude._ip" : "192.168.1.10"
+      }
+  }'
+#+END_EXAMPLE
+
+Please note that this isn't a runnable example because all of the
+Elasticsearch nodes on my laptop share the same ip address.
+
+Also, please note that the *transient* properties aren't persisted
+between reboots.
+
+Once you execute this command the shards on that node will be moved
+to other nodes. Here's how you check the status of the nodes:
+
+#+BEGIN_SRC python :exports both :results output :noweb yes
+  <<request_boilerplate>>
+  url = 'http://localhost:9200/_nodes'
+  payload = {'pretty': True}
+  r = requests.get(url, params = payload)
+  print r.text 
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+{
+  "cluster_name" : "tom-purls-test",
+  "nodes" : {
+    "skk2gw8eTvGRHPyuY3W-HQ" : {
+      "name" : "Black Marvel",
+      "transport_address" : "inet[/127.0.0.1:9300]",
+      "host" : "PAM",
+      "ip" : "10.98.69.190",
+      "version" : "1.7.6",
+      "build" : "c730b59",
+      "http_address" : "inet[/127.0.0.1:9200]",
+      "settings" : {
+        "client" : {
+          "type" : "node"
+        },
+        "name" : "Black Marvel",
+        "path" : {
+          "logs" : "C:/Users/tom/Documents/td/apps/elasticsearch-1.7.6/logs",
+          "home" : "C:\\Users\\tom\\Documents\\td\\apps\\elasticsearch-1.7.6"
+        },
+        "cluster" : {
+          "name" : "tom-purls-test"
+        },
+        "config" : {
+          "ignore_system_properties" : "true"
+        },
+        "script" : {
+          "disable_dynamic" : "false"
+        },
+        "network" : {
+          "host" : "127.0.0.1"
+        }
+      },
+      "os" : {
+        "refresh_interval_in_millis" : 1000,
+        "available_processors" : 8,
+        "cpu" : {
+          "vendor" : "Intel",
+          "model" : "Core(TM) i7-6820HQ CPU @ 2.70GHz",
+          "mhz" : 2712,
+          "total_cores" : 8,
+          "total_sockets" : 8,
+          "cores_per_socket" : 16,
+          "cache_size_in_bytes" : -1
+        },
+        "mem" : {
+          "total_in_bytes" : 16796622848
+        },
+        "swap" : {
+          "total_in_bytes" : 33591341056
+        }
+      },
+      "process" : {
+        "refresh_interval_in_millis" : 1000,
+        "id" : 4664,
+        "max_file_descriptors" : -1,
+        "mlockall" : false
+      },
+      "jvm" : {
+        "pid" : 4664,
+        "version" : "1.7.0_79",
+        "vm_name" : "Java HotSpot(TM) 64-Bit Server VM",
+        "vm_version" : "24.79-b02",
+        "vm_vendor" : "Oracle Corporation",
+        "start_time_in_millis" : 1481898434486,
+        "mem" : {
+          "heap_init_in_bytes" : 268435456,
+          "heap_max_in_bytes" : 1037959168,
+          "non_heap_init_in_bytes" : 24313856,
+          "non_heap_max_in_bytes" : 136314880,
+          "direct_max_in_bytes" : 1037959168
+        },
+        "gc_collectors" : [ "ParNew", "ConcurrentMarkSweep" ],
+        "memory_pools" : [ "Code Cache", "Par Eden Space", "Par Survivor Space", "CMS Old Gen", "CMS Perm Gen" ]
+      },
+      "thread_pool" : {
+        "generic" : {
+          "type" : "cached",
+          "keep_alive" : "30s",
+          "queue_size" : -1
+        },
+        "index" : {
+          "type" : "fixed",
+          "min" : 8,
+          "max" : 8,
+          "queue_size" : "200"
+        },
+        "fetch_shard_store" : {
+          "type" : "scaling",
+          "min" : 1,
+          "max" : 16,
+          "keep_alive" : "5m",
+          "queue_size" : -1
+        },
+        "get" : {
+          "type" : "fixed",
+          "min" : 8,
+          "max" : 8,
+          "queue_size" : "1k"
+        },
+        "snapshot" : {
+          "type" : "scaling",
+          "min" : 1,
+          "max" : 4,
+          "keep_alive" : "5m",
+          "queue_size" : -1
+        },
+        "merge" : {
+          "type" : "scaling",
+          "min" : 1,
+          "max" : 4,
+          "keep_alive" : "5m",
+          "queue_size" : -1
+        },
+        "suggest" : {
+          "type" : "fixed",
+          "min" : 8,
+          "max" : 8,
+          "queue_size" : "1k"
+        },
+        "bulk" : {
+          "type" : "fixed",
+          "min" : 8,
+          "max" : 8,
+          "queue_size" : "50"
+        },
+        "optimize" : {
+          "type" : "fixed",
+          "min" : 1,
+          "max" : 1,
+          "queue_size" : -1
+        },
+        "warmer" : {
+          "type" : "scaling",
+          "min" : 1,
+          "max" : 4,
+          "keep_alive" : "5m",
+          "queue_size" : -1
+        },
+        "flush" : {
+          "type" : "scaling",
+          "min" : 1,
+          "max" : 4,
+          "keep_alive" : "5m",
+          "queue_size" : -1
+        },
+        "search" : {
+          "type" : "fixed",
+          "min" : 13,
+          "max" : 13,
+          "queue_size" : "1k"
+        },
+        "fetch_shard_started" : {
+          "type" : "scaling",
+          "min" : 1,
+          "max" : 16,
+          "keep_alive" : "5m",
+          "queue_size" : -1
+        },
+        "listener" : {
+          "type" : "fixed",
+          "min" : 4,
+          "max" : 4,
+          "queue_size" : -1
+        },
+        "percolate" : {
+          "type" : "fixed",
+          "min" : 8,
+          "max" : 8,
+          "queue_size" : "1k"
+        },
+        "management" : {
+          "type" : "scaling",
+          "min" : 1,
+          "max" : 5,
+          "keep_alive" : "5m",
+          "queue_size" : -1
+        },
+        "refresh" : {
+          "type" : "scaling",
+          "min" : 1,
+          "max" : 4,
+          "keep_alive" : "5m",
+          "queue_size" : -1
+        }
+      },
+      "network" : {
+        "refresh_interval_in_millis" : 5000,
+        "primary_interface" : {
+          "address" : "10.98.69.190",
+          "name" : "eth10",
+          "mac_address" : "00:05:9A:3C:7A:00"
+        }
+      },
+      "transport" : {
+        "bound_address" : "inet[/127.0.0.1:9300]",
+        "publish_address" : "inet[/127.0.0.1:9300]",
+        "profiles" : { }
+      },
+      "http" : {
+        "bound_address" : "inet[/127.0.0.1:9200]",
+        "publish_address" : "inet[/127.0.0.1:9200]",
+        "max_content_length_in_bytes" : 104857600
+      },
+      "plugins" : [ {
+        "name" : "kopf",
+        "version" : "1.6.2",
+        "description" : "kopf - simple web administration tool for ElasticSearch",
+        "url" : "/_plugin/kopf/",
+        "jvm" : false,
+        "site" : true
+      } ]
+    },
+    "zvICAmu9QMOAYUZlVCR_HQ" : {
+      "name" : "Blue Bullet",
+      "transport_address" : "inet[/127.0.0.1:9302]",
+      "host" : "PAM",
+      "ip" : "10.98.69.190",
+      "version" : "1.7.6",
+      "build" : "c730b59",
+      "http_address" : "inet[/127.0.0.1:9202]",
+      "settings" : {
+        "client" : {
+          "type" : "node"
+        },
+        "name" : "Blue Bullet",
+        "path" : {
+          "logs" : "C:/Users/tom/Documents/td/apps/elasticsearch-1.7.6/logs",
+          "home" : "C:\\Users\\tom\\Documents\\td\\apps\\elasticsearch-1.7.6"
+        },
+        "cluster" : {
+          "name" : "tom-purls-test"
+        },
+        "config" : {
+          "ignore_system_properties" : "true"
+        },
+        "script" : {
+          "disable_dynamic" : "false"
+        },
+        "network" : {
+          "host" : "127.0.0.1"
+        }
+      },
+      "os" : {
+        "refresh_interval_in_millis" : 1000,
+        "available_processors" : 8,
+        "cpu" : {
+          "vendor" : "Intel",
+          "model" : "Core(TM) i7-6820HQ CPU @ 2.70GHz",
+          "mhz" : 2712,
+          "total_cores" : 8,
+          "total_sockets" : 8,
+          "cores_per_socket" : 16,
+          "cache_size_in_bytes" : -1
+        },
+        "mem" : {
+          "total_in_bytes" : 16796622848
+        },
+        "swap" : {
+          "total_in_bytes" : 33591341056
+        }
+      },
+      "process" : {
+        "refresh_interval_in_millis" : 1000,
+        "id" : 15084,
+        "max_file_descriptors" : -1,
+        "mlockall" : false
+      },
+      "jvm" : {
+        "pid" : 15084,
+        "version" : "1.7.0_79",
+        "vm_name" : "Java HotSpot(TM) 64-Bit Server VM",
+        "vm_version" : "24.79-b02",
+        "vm_vendor" : "Oracle Corporation",
+        "start_time_in_millis" : 1481898469416,
+        "mem" : {
+          "heap_init_in_bytes" : 268435456,
+          "heap_max_in_bytes" : 1037959168,
+          "non_heap_init_in_bytes" : 24313856,
+          "non_heap_max_in_bytes" : 136314880,
+          "direct_max_in_bytes" : 1037959168
+        },
+        "gc_collectors" : [ "ParNew", "ConcurrentMarkSweep" ],
+        "memory_pools" : [ "Code Cache", "Par Eden Space", "Par Survivor Space", "CMS Old Gen", "CMS Perm Gen" ]
+      },
+      "thread_pool" : {
+        "generic" : {
+          "type" : "cached",
+          "keep_alive" : "30s",
+          "queue_size" : -1
+        },
+        "index" : {
+          "type" : "fixed",
+          "min" : 8,
+          "max" : 8,
+          "queue_size" : "200"
+        },
+        "fetch_shard_store" : {
+          "type" : "scaling",
+          "min" : 1,
+          "max" : 16,
+          "keep_alive" : "5m",
+          "queue_size" : -1
+        },
+        "get" : {
+          "type" : "fixed",
+          "min" : 8,
+          "max" : 8,
+          "queue_size" : "1k"
+        },
+        "snapshot" : {
+          "type" : "scaling",
+          "min" : 1,
+          "max" : 4,
+          "keep_alive" : "5m",
+          "queue_size" : -1
+        },
+        "merge" : {
+          "type" : "scaling",
+          "min" : 1,
+          "max" : 4,
+          "keep_alive" : "5m",
+          "queue_size" : -1
+        },
+        "suggest" : {
+          "type" : "fixed",
+          "min" : 8,
+          "max" : 8,
+          "queue_size" : "1k"
+        },
+        "bulk" : {
+          "type" : "fixed",
+          "min" : 8,
+          "max" : 8,
+          "queue_size" : "50"
+        },
+        "optimize" : {
+          "type" : "fixed",
+          "min" : 1,
+          "max" : 1,
+          "queue_size" : -1
+        },
+        "warmer" : {
+          "type" : "scaling",
+          "min" : 1,
+          "max" : 4,
+          "keep_alive" : "5m",
+          "queue_size" : -1
+        },
+        "flush" : {
+          "type" : "scaling",
+          "min" : 1,
+          "max" : 4,
+          "keep_alive" : "5m",
+          "queue_size" : -1
+        },
+        "search" : {
+          "type" : "fixed",
+          "min" : 13,
+          "max" : 13,
+          "queue_size" : "1k"
+        },
+        "fetch_shard_started" : {
+          "type" : "scaling",
+          "min" : 1,
+          "max" : 16,
+          "keep_alive" : "5m",
+          "queue_size" : -1
+        },
+        "listener" : {
+          "type" : "fixed",
+          "min" : 4,
+          "max" : 4,
+          "queue_size" : -1
+        },
+        "percolate" : {
+          "type" : "fixed",
+          "min" : 8,
+          "max" : 8,
+          "queue_size" : "1k"
+        },
+        "management" : {
+          "type" : "scaling",
+          "min" : 1,
+          "max" : 5,
+          "keep_alive" : "5m",
+          "queue_size" : -1
+        },
+        "refresh" : {
+          "type" : "scaling",
+          "min" : 1,
+          "max" : 4,
+          "keep_alive" : "5m",
+          "queue_size" : -1
+        }
+      },
+      "network" : {
+        "refresh_interval_in_millis" : 5000,
+        "primary_interface" : {
+          "address" : "10.98.69.190",
+          "name" : "eth10",
+          "mac_address" : "00:05:9A:3C:7A:00"
+        }
+      },
+      "transport" : {
+        "bound_address" : "inet[/127.0.0.1:9302]",
+        "publish_address" : "inet[/127.0.0.1:9302]",
+        "profiles" : { }
+      },
+      "http" : {
+        "bound_address" : "inet[/127.0.0.1:9202]",
+        "publish_address" : "inet[/127.0.0.1:9202]",
+        "max_content_length_in_bytes" : 104857600
+      },
+      "plugins" : [ {
+        "name" : "kopf",
+        "version" : "1.6.2",
+        "description" : "kopf - simple web administration tool for ElasticSearch",
+        "url" : "/_plugin/kopf/",
+        "jvm" : false,
+        "site" : true
+      } ]
+    },
+    "xBXxwoU5RcCQ0vguXMUNvA" : {
+      "name" : "Air-Walker",
+      "transport_address" : "inet[/127.0.0.1:9301]",
+      "host" : "PAM",
+      "ip" : "10.98.69.190",
+      "version" : "1.7.6",
+      "build" : "c730b59",
+      "http_address" : "inet[/127.0.0.1:9201]",
+      "settings" : {
+        "client" : {
+          "type" : "node"
+        },
+        "name" : "Air-Walker",
+        "path" : {
+          "logs" : "C:/Users/tom/Documents/td/apps/elasticsearch-1.7.6/logs",
+          "home" : "C:\\Users\\tom\\Documents\\td\\apps\\elasticsearch-1.7.6"
+        },
+        "cluster" : {
+          "name" : "tom-purls-test"
+        },
+        "config" : {
+          "ignore_system_properties" : "true"
+        },
+        "script" : {
+          "disable_dynamic" : "false"
+        },
+        "network" : {
+          "host" : "127.0.0.1"
+        }
+      },
+      "os" : {
+        "refresh_interval_in_millis" : 1000,
+        "available_processors" : 8,
+        "cpu" : {
+          "vendor" : "Intel",
+          "model" : "Core(TM) i7-6820HQ CPU @ 2.70GHz",
+          "mhz" : 2712,
+          "total_cores" : 8,
+          "total_sockets" : 8,
+          "cores_per_socket" : 16,
+          "cache_size_in_bytes" : -1
+        },
+        "mem" : {
+          "total_in_bytes" : 16796622848
+        },
+        "swap" : {
+          "total_in_bytes" : 33591341056
+        }
+      },
+      "process" : {
+        "refresh_interval_in_millis" : 1000,
+        "id" : 13856,
+        "max_file_descriptors" : -1,
+        "mlockall" : false
+      },
+      "jvm" : {
+        "pid" : 13856,
+        "version" : "1.7.0_79",
+        "vm_name" : "Java HotSpot(TM) 64-Bit Server VM",
+        "vm_version" : "24.79-b02",
+        "vm_vendor" : "Oracle Corporation",
+        "start_time_in_millis" : 1481898454058,
+        "mem" : {
+          "heap_init_in_bytes" : 268435456,
+          "heap_max_in_bytes" : 1037959168,
+          "non_heap_init_in_bytes" : 24313856,
+          "non_heap_max_in_bytes" : 136314880,
+          "direct_max_in_bytes" : 1037959168
+        },
+        "gc_collectors" : [ "ParNew", "ConcurrentMarkSweep" ],
+        "memory_pools" : [ "Code Cache", "Par Eden Space", "Par Survivor Space", "CMS Old Gen", "CMS Perm Gen" ]
+      },
+      "thread_pool" : {
+        "generic" : {
+          "type" : "cached",
+          "keep_alive" : "30s",
+          "queue_size" : -1
+        },
+        "index" : {
+          "type" : "fixed",
+          "min" : 8,
+          "max" : 8,
+          "queue_size" : "200"
+        },
+        "fetch_shard_store" : {
+          "type" : "scaling",
+          "min" : 1,
+          "max" : 16,
+          "keep_alive" : "5m",
+          "queue_size" : -1
+        },
+        "get" : {
+          "type" : "fixed",
+          "min" : 8,
+          "max" : 8,
+          "queue_size" : "1k"
+        },
+        "snapshot" : {
+          "type" : "scaling",
+          "min" : 1,
+          "max" : 4,
+          "keep_alive" : "5m",
+          "queue_size" : -1
+        },
+        "merge" : {
+          "type" : "scaling",
+          "min" : 1,
+          "max" : 4,
+          "keep_alive" : "5m",
+          "queue_size" : -1
+        },
+        "suggest" : {
+          "type" : "fixed",
+          "min" : 8,
+          "max" : 8,
+          "queue_size" : "1k"
+        },
+        "bulk" : {
+          "type" : "fixed",
+          "min" : 8,
+          "max" : 8,
+          "queue_size" : "50"
+        },
+        "optimize" : {
+          "type" : "fixed",
+          "min" : 1,
+          "max" : 1,
+          "queue_size" : -1
+        },
+        "warmer" : {
+          "type" : "scaling",
+          "min" : 1,
+          "max" : 4,
+          "keep_alive" : "5m",
+          "queue_size" : -1
+        },
+        "flush" : {
+          "type" : "scaling",
+          "min" : 1,
+          "max" : 4,
+          "keep_alive" : "5m",
+          "queue_size" : -1
+        },
+        "search" : {
+          "type" : "fixed",
+          "min" : 13,
+          "max" : 13,
+          "queue_size" : "1k"
+        },
+        "fetch_shard_started" : {
+          "type" : "scaling",
+          "min" : 1,
+          "max" : 16,
+          "keep_alive" : "5m",
+          "queue_size" : -1
+        },
+        "listener" : {
+          "type" : "fixed",
+          "min" : 4,
+          "max" : 4,
+          "queue_size" : -1
+        },
+        "percolate" : {
+          "type" : "fixed",
+          "min" : 8,
+          "max" : 8,
+          "queue_size" : "1k"
+        },
+        "management" : {
+          "type" : "scaling",
+          "min" : 1,
+          "max" : 5,
+          "keep_alive" : "5m",
+          "queue_size" : -1
+        },
+        "refresh" : {
+          "type" : "scaling",
+          "min" : 1,
+          "max" : 4,
+          "keep_alive" : "5m",
+          "queue_size" : -1
+        }
+      },
+      "network" : {
+        "refresh_interval_in_millis" : 5000,
+        "primary_interface" : {
+          "address" : "10.98.69.190",
+          "name" : "eth10",
+          "mac_address" : "00:05:9A:3C:7A:00"
+        }
+      },
+      "transport" : {
+        "bound_address" : "inet[/127.0.0.1:9301]",
+        "publish_address" : "inet[/127.0.0.1:9301]",
+        "profiles" : { }
+      },
+      "http" : {
+        "bound_address" : "inet[/127.0.0.1:9201]",
+        "publish_address" : "inet[/127.0.0.1:9201]",
+        "max_content_length_in_bytes" : 104857600
+      },
+      "plugins" : [ {
+        "name" : "kopf",
+        "version" : "1.6.2",
+        "description" : "kopf - simple web administration tool for ElasticSearch",
+        "url" : "/_plugin/kopf/",
+        "jvm" : false,
+        "site" : true
+      } ]
+    }
+  }
+}
+
+#+end_example
+
+** 9.4 - Upgrading Elasticsearch Nodes
+
+- Upgrade caveats
+  - You can't downgrade a node after writing data to it.
+  - Don't mix JVM versions since there could be serialization issues.
+
+*** 9.4.1 - Performing a rolling restart
+
+You can upgrade one node at a time. 
+
+One thing you probably don't want to do while performing a rolling
+upgrade is have the cluster dynamically re-allocate shards. You 
+can turn this off by *disabling allocation*.
+
+Process for rolling upgrades:
+
+1. Disable allocation
+2. Shut down node that will be upgraded
+3. Upgrade that node
+4. Start that node
+5. Wait until it has joined the cluster.
+6. Enable allocation for cluster
+7. Wait for cluster to become "green" again.
+8. Rinse and repeat for every node in the cluster.
+
+You can't just enable and disable allocation once after upgrading all
+of the nodes. If you did this then the shards on the upgraded node
+would not be re-allocated to the cluster, meaning that sooner or later
+you would get to a point where you would be missing both the primary
+and replica copies of some of your shards.
+
+Also, this process assumes that each of your primaries has at least
+one replica. If not then you would need to decommission the node
+before upgrading it.
+
+Here's how you disable allocation:
+
+#+BEGIN_SRC python :exports both :results output :noweb yes
+  <<request_boilerplate>>
+  url = 'http://localhost:9200/_cluster/settings'
+  disable_allocation = '''
+  {
+    "transient" : {
+      "cluster.routing.allocation.enable" : "none"
+    }
+  }
+  '''
+  r = requests.put(url, data = disable_allocation)
+  print r.text 
+#+END_SRC
+
+#+RESULTS:
+: {"acknowledged":true,"persistent":{},"transient":{"cluster":{"routing":{"allocation":{"enable":"none"}}}}}
+
+Here's how you enable it:
+
+#+BEGIN_SRC python :exports both :results output :noweb yes
+  <<request_boilerplate>>
+  url = 'http://localhost:9200/_cluster/settings'
+  enable_allocation = '''
+  {
+    "transient" : {
+      "cluster.routing.allocation.enable" : "all"
+    }
+  }
+  '''
+  r = requests.put(url, data = enable_allocation)
+  print r.text 
+#+END_SRC
+
+#+RESULTS:
+: {"acknowledged":true,"persistent":{},"transient":{"cluster":{"routing":{"allocation":{"enable":"all"}}}}}
+
+*** 9.4.2 - Minimizing recovery time for a restart
+
+This process can take a while because Elasticsearch replicates at 
+a *segment* level instead of a document level. There's a few ways
+around this that don't seem super useful now.
+
+** 9.5 - Using the _cat API
+
+The _cat API is much easier to read and doesn't use JSON.
+
+*** Examples
+
+Cluster health:
+
+#+BEGIN_SRC python :exports both :results output :noweb yes
+  <<request_boilerplate>>
+  url = 'http://localhost:9200/_cat/health'
+  payload = {'v': True}
+
+  r = requests.get(url, params = payload)
+  print r.text 
+#+END_SRC
+
+#+RESULTS:
+: epoch      timestamp cluster        status node.total node.data shards pri relo init unassign pending_tasks 
+: 1482161097 10:24:57  tom-purls-test green           3         3     34  17    0    0        0             0 
+: 
+
+Retrieving a list of nodes:
+
+#+BEGIN_SRC python :exports both :results output :noweb yes
+  <<request_boilerplate>>
+  url = 'http://localhost:9200/_cat/nodes'
+  payload = {'v': True}
+
+  r = requests.get(url, params = payload)
+  print r.text 
+#+END_SRC
+
+#+RESULTS:
+: host       ip           heap.percent ram.percent load node.role master name         
+: PAM 10.98.69.190            4          34      d         *      Black Marvel 
+: PAM 10.98.69.190            8          34      d         m      Blue Bullet  
+: PAM 10.98.69.190            4          34      d         m      Air-Walker   
+: 
+
+** 9.6 - Scaling Strategies
+
+*** 9.6.1 - Over-sharding
+
+You can't host a primary shard on more than one node, so you can't use
+more nodes than you have primary indexes. 
+
+So why not add more primary shards so you can use more nodes? You
+can't add a shard to an index without re-indexing. You therefore want
+to create enough shards to give yourself some room to grow.
+
+There's no tried-and-true formula for determining the number of shards
+you should create.
+
+*** 9.6.2 - Splitting data into indices and shards
+
+Your data scan span multiple indices, e.g. you could create a new index
+every day to store log information. Then as you start collecting more logs
+you can start with a higher number of shards.
+
+You can also use aliases to point at an index, e.g. the "current" alias
+could point at the index that stores log information for today.
+
+*** 9.6.3 - Maximizing throughput
+
+There's a couple of simple strategies here that don't really bare
+repeating I guess.
+
+** 9.7 - Aliases
+
+You will want to always use aliases apparently :-) 
+
+*** 9.7.1 - What is an alias, really?
+
+Aliases are very lightweight pointers.
+
+**** Why are aliases useful?
+
+Aliases are especially useful when you re-index because you can use
+a new index name to point at a re-indexed version of an index.
+
+**** Managing aliases
+
+You can do this via http.
+
+*** 9.7 2 - Alias creation
+
+Lots and lots of options.
+
+** 9.8 - Routing
+
+Routing is the process by which a document is sent to a shard.
+
+*** 9.8.1 - Why use routing?
+
+This isn't something that is applicable to my needs so I will come
+back to it later if necessary.

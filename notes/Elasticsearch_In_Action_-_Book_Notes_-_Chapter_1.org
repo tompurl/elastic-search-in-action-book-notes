@@ -1,0 +1,162 @@
+#+SETUPFILE: static/org-html-themes/setup/theme-bigblow.setup
+#+TITLE: Elasticsearch In Action - Book Notes - Chapter 1
+
+* Navigation
+
+- [[file:Elasticsearch_In_Action_-_Book_Notes.org][Elasticsearch In Action - Book Notes]] (Top)
+- [[file:Elasticsearch_In_Action_-_Book_Notes_-_Chapter_2.org][Elasticsearch In Action - Book Notes - Chapter 2]] (Forward)
+
+* Chapter 1 - Introducing Elasticsearch
+
+We want searches to be smart and fast.
+
+Elasticsearch uses NoSQL, document-oriented data stores.
+
+Built on top of Lucene
+
+** 1.1 - Solving Search Problems With Elasticsearch
+
+Fast, smart, yadda yadda
+
+*** 1.1.1 - Providing quick searches
+
+Elasticsearch does full text index indexing. It also uses an
+*inverted index* which really hasn't been explained yet. But
+apparently they're good for relevance.
+
+*** 1.1.2 - Ensuring relevant results
+
+Each document returned by a search will have a *relevancy score*.
+Elasticsearch can use multiple algorithms to do this, and the default 
+is called *TF-IDF*, or /term frequency-inverse document frequency/:
+
+- *Term frequency* - The number of times you see a term.
+- *Inverse document frequency* - The weight of the word is higher if
+  it is uncommon.
+
+You can also influence relevancy by doing things such as "boosting"
+the score if the search term is in the title of a document or if a
+document has lots of likes.
+
+*** 1.1.3 - Searching beyond exact matches
+
+Other cool things:
+
+- Handling typos
+- Knowing that "bicycle" is basically the same as "bicyclist". This is
+  called a word *derivative*.
+- Stats 
+- Suggestions
+
+** 1.2 - Exploring Typical Elasticsearch Use Cases
+
+Elasticsearch is just a search engine (which is also called a "data
+store" in this paragraph, which is something different to me). You
+need a *front end* and a *way to feed data into it*.
+
+*** 1.2.1 - Using Elasticsearch as the primary back end
+
+Elasticsearch is a "modern search engine" that provides the following:
+
+- durable storage
+- statistics
+- lots of other stuff.
+
+It's reasonable to consider using Elasticsearch as your primary data
+store unless you need the following:
+
+- Lots of writse
+- Transactions
+  - You can use versioning to manage concurrency, but I don't yet see
+    what that has to do with transactions
+
+It's amazing to me that they had to write this down:
+
+#+BEGIN_QUOTE -r
+
+Also, regular backups are a good practice when you're using a single
+data store. We'll discuss backups in chapter 11.
+
+#+END_QUOTE
+
+Now we're talking about clustering? I feel that this book could be a
+bit more focused.
+
+*** 1.2.2 - Adding Elasticsearch to an existing system
+
+Elasticsearch would simply handle searches in this scenario.
+
+You need to keep multiple data stores in sync. Typically this is some
+sort of Elasticsearch plugin that reads updates of the primary data
+store and uses them to update the Elasticsearch data store.
+
+*** 1.2.3 - Using Elasticsearch with existing tools
+
+You can use Elasticsearch with ELK and such create really cool tools.
+
+*** 1.2.4 - Main Elasticsearch features
+
+- Cool indexing options thanks to Lucene
+- Caching and real-time analytics
+- Cool clustering stuff that you can do
+
+*** 1.2.5 - Extending Lucene functionality
+
+Elasticsearch has a cool JSON-based querying API.
+
+There's a separate *analysis* step that happens while adding content
+to Elasticsearch. So when you add a doc with "bicycle race" the 
+analysis process may also add "racing" and "cycling" to the index.
+The same thing happens when you search. 
+
+This is a bit muddy to me, but they tell you how to write your own 
+analyzers in chapter 5.
+
+*** 1.2.6 - Structuring your data in Elasticsearch
+
+Uhh, this isn't the world's best explanation of why you should store
+some types of data in a document-based database instead of a
+relational database.
+
+*** 1.2.7 - Installing Java
+
+I know how to do this.
+
+*** 1.2.8 - Downloading and starting Elasticsearch
+
+From a setup perspective this is a pretty lightweight app. I was able
+to just download the .zip file and then start it by executing the
+=elasticsearch.bat= file on my Windows 7 laptop at work. This is very
+nice.
+
+One small tip for Windows 7 - please make sure that you set the
+=network.host= value to =127.0.0.1= when you're experimenting on your
+laptop. Otherwise you will get some crazy errors. I found out 
+about this fix [[http://stackoverflow.com/a/33247150/1380901][here]].
+
+Oh, also I'm running the latest 1.7.6 version of the tool because
+that's the latest 1.x version and this book was written to work with
+the 1.5.x version. There's also a 2.x version and a 5.x version, both
+of which break API compatibility.
+
+*** 1.2.9 Verifying that it works
+
+Here's what it looks like for me:
+
+#+BEGIN_EXAMPLE
+
+[2016-11-30 08:42:54,229][INFO ][node                     ] [Bible John] version[1.7.6], pid[15496], build[c730b59/2016-11-18T15:21:16Z]
+[2016-11-30 08:42:54,231][INFO ][node                     ] [Bible John] initializing ...
+[2016-11-30 08:42:54,356][INFO ][plugins                  ] [Bible John] loaded [], sites []
+[2016-11-30 08:42:55,930][INFO ][env                      ] [Bible John] using [1] data paths, mounts [[PNCWIN07 (C:)]], net usable_space [102.4gb], net total_space [238.4gb], types [NTFS]
+[2016-11-30 08:43:00,040][INFO ][node                     ] [Bible John] initialized
+[2016-11-30 08:43:00,040][INFO ][node                     ] [Bible John] starting ...
+[2016-11-30 08:43:00,507][INFO ][transport                ] [Bible John] bound_address {inet[/127.0.0.1:9300]}, publish_address {inet[/127.0.0.1:9300]}
+[2016-11-30 08:43:00,734][INFO ][discovery                ] [Bible John] elasticsearch/30sYOSheRd-Hwj0GvsPYmg
+[2016-11-30 08:43:04,512][INFO ][cluster.service          ] [Bible John] new_master [Bible John][30sYOSheRd-Hwj0GvsPYmg][PAM][inet[/127.0.0.1:9300]], reason: zen-disco-join (elected_as_master)
+[2016-11-30 08:43:04,566][INFO ][gateway                  ] [Bible John] recovered [0] indices into cluster_state
+[2016-11-30 08:43:04,772][INFO ][http                     ] [Bible John] bound_address {inet[/127.0.0.1:9200]}, publish_address {inet[/127.0.0.1:9200]}
+[2016-11-30 08:43:04,773][INFO ][node                     ] [Bible John] started
+
+#+END_EXAMPLE
+

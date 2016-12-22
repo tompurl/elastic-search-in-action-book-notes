@@ -1,0 +1,918 @@
+#+SETUPFILE: static/org-html-themes/setup/theme-bigblow.setup
+#+TITLE: Elasticsearch In Action - Book Notes - Chapter 3
+#+PROPERTY: header-args :eval never-export :exports code
+
+
+* Navigation
+
+- [[file:Elasticsearch_In_Action_-_Book_Notes.org][Elasticsearch In Action - Book Notes]] (Top)
+- [[file:Elasticsearch_In_Action_-_Book_Notes_-_Chapter_2.org][Elasticsearch In Action - Book Notes - Chapter 2]] (Back)
+- [[file:Elasticsearch_In_Action_-_Book_Notes_-_Chapter_4.org][Elasticsearch In Action - Book Notes - Chapter 4]] (Forward)
+
+* Notes On Code Examples
+
+Now that I'm running a bunch a =curl= examples I would like practice
+some [[https://en.wikipedia.org/wiki/Literate_programming][literate programming]]. Since I'm writing this using Emacs,
+org-mode and Babel this is super easy. However, I'm having some issues
+running the curl one-liners because I'm taking my notes on a Windows 7
+system. 
+
+Cygwin is an option but it adds a bunch of its own issues, so instead
+I'm going to be executing all of the =curl= examples in Python using
+the [[http://docs.python-requests.org/en/latest/][requests]] library. Therefore, if you would also like to execute
+some of the code examples below you will need to install the
+following:
+
+- Emacs (which comes with org-mode and Babel)
+- Configure Babel to interpret Python code (which is very simple)
+- A Python 2.x runtime
+- The =requests= Python library
+
+Instructions on installing and configuring the software above is
+beyond the scope of my notes. The good news is that you *don't have to
+install this software* to read and understand these notes. You would
+only need to install them if you wanted to actually run the code in a
+Emacs instance.
+
+One more thing. Here's a chunk of Python that every curl-like code
+example will need:
+
+#+name: request_boilerplate
+#+BEGIN_SRC python
+import os, requests
+os.environ['NO_PROXY'] = 'localhost'
+
+#+END_SRC
+
+#+RESULTS: request_boilerplate
+: None
+
+
+* Chapter 3 - Indexing, updating, and deleting data
+
+Three types of fields:
+
+- *Core*: E.g. =long=, =string=, etc.
+- *Arrays and multi-fields* - Er doy
+- *Predefined* - E.g. =_ttl= and =_timestamp=
+
+** 3.1 - Using Mappings To Define Kinds Of Documents
+
+Index -> type -> document
+
+Mappings include all the fields that might appear in a document
+of a certain type and tells Elasticsearch how to index them.
+
+*** Types provide only logical separation
+
+This is also a lot like FileNet from a high level. You can only use a
+field name once in an Elasticsearch index because behind the scenes an
+Elasticsearch index is stored in a single Lucene index. So different
+types in the same index must use a particular field in the same way.
+
+Types only exist as a layer of abstraction in Elasticsearch, *not*
+in Lucene.
+
+*** 3.1.1 - Retrieving and defining mappings
+
+Here's how you retrieve the mapping for the *group* type:
+
+#+BEGIN_SRC python :exports both :results output :noweb yes :eval never-export
+  <<request_boilerplate>>
+  url = 'http://localhost:9200/get-together/group/_mapping?pretty' 
+  r = requests.get(url)
+  print r.text
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+{
+  "get-together" : {
+    "mappings" : {
+      "group" : {
+        "_all" : {
+          "enabled" : true
+        },
+        "properties" : {
+          "created_on" : {
+            "type" : "date",
+            "format" : "yyyy-MM-dd"
+          },
+          "description" : {
+            "type" : "string",
+            "term_vector" : "with_positions_offsets"
+          },
+          "location_group" : {
+            "type" : "string"
+          },
+          "members" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "organizer" : {
+            "type" : "string"
+          },
+          "tags" : {
+            "type" : "string",
+            "fields" : {
+              "verbatim" : {
+                "type" : "string",
+                "index" : "not_analyzed"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+#+end_example
+
+...and here's how you create a mapping for a *new* type called
+*new-events*:
+
+#+BEGIN_SRC python :exports both :results output :noweb yes
+  <<request_boilerplate>>
+  url = 'http://localhost:9200/get-together/new-events/1'
+  new_mapping = '''
+  { 
+    "name": "Late Night with Elasticsearch",
+    "date": "2013-10-25T19:00" 
+  }
+  '''
+  r = requests.put(url, data = new_mapping)
+  print r.text
+#+END_SRC
+
+#+RESULTS:
+: {"_index":"get-together","_type":"new-events","_id":"1","_version":1,"created":true}
+
+Note that the HTTP verb for creating a new mapping is *PUT*, not POST.
+
+Now let's looking at the mapping for the *new-events* type:
+
+#+name: print_get_together_properties
+#+BEGIN_SRC python :exports both :results output :noweb yes
+  <<request_boilerplate>>
+  url = 'http://localhost:9200/get-together/_mapping/new-events?pretty'
+  r = requests.get(url)
+  print r.text
+#+END_SRC
+
+#+RESULTS: print_get_together_properties
+#+begin_example
+{
+  "get-together" : {
+    "mappings" : {
+      "new-events" : {
+        "properties" : {
+          "date" : {
+            "type" : "date",
+            "format" : "dateOptionalTime"
+          },
+          "name" : {
+            "type" : "string"
+          }
+        }
+      }
+    }
+  }
+}
+
+#+end_example
+
+Great, now let's add a new property to the *new-events* mapping.
+Note the following:
+
+- It's the same URL as the request to *view* the mapping. The
+  difference is that were doing a PUT instead of a GET.
+- We're using the same schema as above, just adding a new property to
+  it.
+
+#+BEGIN_SRC python :exports both :results output :noweb yes
+  <<request_boilerplate>>
+  url = 'http://localhost:9200/get-together/_mapping/new-events'
+  new_mapping = '''
+  { 
+    "new-events" : {
+      "properties" : {
+        "host" : {
+          "type" : "string"
+        }
+      }
+    }
+  }
+  '''
+  r = requests.put(url, data = new_mapping)
+  print r.text
+#+END_SRC
+
+#+RESULTS:
+: {"acknowledged":true}
+
+Now let's look at our *new-events* mapping again with the additional
+property:
+
+#+BEGIN_SRC python :exports both :results output :noweb yes
+  <<print_get_together_properties>>
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+{
+  "get-together" : {
+    "mappings" : {
+      "new-events" : {
+        "properties" : {
+          "date" : {
+            "type" : "date",
+            "format" : "dateOptionalTime"
+          },
+          "host" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          }
+        }
+      }
+    }
+  }
+}
+
+#+end_example
+
+*** 3.1.2 - Extending an existing mapping
+
+When you put a mapping over an exiting one the two are merged.
+
+You can't change the following on an existing field:
+
+- Data type
+- The way it's indexed
+
+Here's what happens when you try:
+
+#+BEGIN_SRC python :exports both :results output :noweb yes
+  <<request_boilerplate>>
+  url = 'http://localhost:9200/get-together/_mapping/new-events'
+  new_mapping = '''
+  { 
+    "new-events" : {
+      "properties" : {
+        "host" : {
+          "type" : "long"
+        }
+      }
+    }
+  }
+  '''
+  r = requests.put(url, data = new_mapping)
+  print r.text
+#+END_SRC
+
+#+RESULTS:
+: {"error":"MergeMappingException[Merge failed with failures {[mapper [host] of different type, current_type [string], merged_type [long]]}]","status":400}
+
+To do this you need to follow these steps:
+
+- Remove all *new-events* documents (which also removes the mapping)
+- Add the new mapping
+- Index all of the data again
+
+This makes sense.
+
+** 3.2 - Core types for defining your own fields in documents
+
+*** 3.2.1 String
+
+Let's perform a string search of a document:
+
+#+BEGIN_SRC python :exports both :results output :noweb yes
+  <<request_boilerplate>>
+  url = 'http://localhost:9200/get-together/new-events/_search?pretty'
+  query = '''
+  { 
+    "query" : {
+      "query_string" : {
+        "query" : "late"
+      }
+    }
+  }
+  '''
+  r = requests.get(url, data = query)
+  print r.text
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+{
+  "took" : 63,
+  "timed_out" : false,
+  "_shards" : {
+    "total" : 2,
+    "successful" : 2,
+    "failed" : 0
+  },
+  "hits" : {
+    "total" : 1,
+    "max_score" : 0.89743817,
+    "hits" : [ {
+      "_index" : "get-together",
+      "_type" : "new-events",
+      "_id" : "1",
+      "_score" : 0.89743817,
+      "_source":
+{ 
+  "name": "Late Night with Elasticsearch",
+  "date": "2013-10-25T19:00" 
+}
+
+    } ]
+  }
+}
+
+#+end_example
+
+When we indexed the "Late Night with Elasticsearch" document [[*3.1.1%20-%20Retrieving%20and%20defining%20mappings][earlier]]
+the *analyzer* lower-cased all of the letters and broke the string
+into words. If a document had the term *latenight* then the search for
+*late* wouldn't find that.
+
+A *term* is the basic unit of searching.
+
+One of the most important things you can do in a mapping is define how
+the fields will be analyzed. For example the *not_analyzed* index
+setting means that the default analyzer won't break down a field into
+words. Searches will only work on exact matches. The *no* index
+setting means that you won't be able to search on a field.
+
+Your query can be analyzed too. So when you search for "Elasticsearch"
+the analyzer may lowercase it. Certain types of queries are analyzed.
+
+*** 3.2.2 - Numeric
+
+These types are mapped to Java primitives.
+
+*** 3.2.3 - Date
+
+Dates are stored as milliseconds since the Unix epoch. Elasticsearch
+uses ISO 8601 timestamps by default.
+
+You can format date strings.
+
+Let's add a new mapping called *weekly-events* that has a custom date
+format:
+
+#+BEGIN_SRC python :exports both :results output :noweb yes
+  <<request_boilerplate>>
+  url = 'http://localhost:9200/get-together/_mapping/weekly-events'
+  new_mapping = '''
+  { 
+    "weekly-events" : {
+      "properties" : {
+        "next_event" : {
+          "type" : "date",
+          "format" : "MMM DD YYYY"
+        }
+      }
+    }
+  }
+  '''
+  r = requests.put(url, data = new_mapping)
+  print r.text
+#+END_SRC
+
+#+RESULTS:
+: {"acknowledged":true}
+
+Now let's add a document.
+
+#+BEGIN_SRC python :exports both :results output :noweb yes
+  <<request_boilerplate>>
+  url = 'http://localhost:9200/get-together/weekly-events/1'
+  new_document = '''
+  { 
+    "name" : "Elasticsearch News",
+    "first_occurence" : "2011-04-03",
+    "next_events" : "Oct 25 2013"
+  }
+  '''
+  r = requests.put(url, data = new_document)
+  print r.text
+#+END_SRC
+
+Please note that one of our data fields uses the standard format and
+one uses our custom format. 
+
+I also wanted to point out that this is very confusing. I don't think
+that in real life I would add properties to a type on the fly like
+this by adding documents. Why wouldn't we just add all of the
+necessary properties to the mapping when we explicitly create it?
+
+#+RESULTS:
+: {"_index":"get-together","_type":"weekly-events","_id":"1","_version":4,"created":true}
+
+...and let's see what that doc looks like:
+
+#+BEGIN_SRC python :exports both :results output :noweb yes
+  <<request_boilerplate>>
+  url = 'http://localhost:9200/get-together/weekly-events/1'
+  r = requests.get(url)
+  print r.text
+#+END_SRC
+
+#+RESULTS:
+: {"_index":"get-together","_type":"weekly-events","_id":"1","_version":4,"found":true,"_source":
+: { 
+:   "name" : "Elasticsearch News",
+:   "first_occurence" : "2011-04-03",
+:   "next_events" : "Oct 25 2013"
+: }
+: }
+
+*** 3.2.4 - Boolean
+
+Er doy.
+
+** 3.3 - Arrays and multi-fields
+
+Otherwise known as breaking first normal form :-) 
+
+*** 3.3.1 - Arrays
+
+As a quick aside, I want to point out that not only can you
+automatically create a new mapping/type by creating a document, you
+can also create a *new index* automatically, just by referencing it.
+That seems a bit dangerous to me, but here goes:
+
+#+BEGIN_SRC python :exports both :results output :noweb yes
+  <<request_boilerplate>>
+  url = 'http://localhost:9200/blog/posts/1'
+  new_post = '''
+  { 
+    "tags": ["first", "initial"]
+  }
+  '''
+  r = requests.put(url, data = new_post)
+  print r.text
+#+END_SRC
+
+#+RESULTS:
+: {"_index":"blog","_type":"posts","_id":"1","_version":1,"created":true}
+
+If you look at the mapping, you'll see that there isn't an "array"
+type. All of the core types simply support one or more values.
+
+#+BEGIN_SRC python :exports both :results output :noweb yes
+  <<request_boilerplate>>
+  url = 'http://localhost:9200/blog/_mapping/posts?pretty'
+  r = requests.get(url)
+  print r.text
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+{
+  "blog" : {
+    "mappings" : {
+      "posts" : {
+        "properties" : {
+          "tags" : {
+            "type" : "string"
+          }
+        }
+      }
+    }
+  }
+}
+
+#+end_example
+
+*** 3.3.2 - Multi-fields
+
+The whole idea behind multifields is that you want to have one
+property indexed multiple ways. Here's an example:
+
+#+BEGIN_SRC python :exports both :results output :noweb yes
+  <<request_boilerplate>>
+  url = 'http://localhost:9200/blog/_mapping/posts'
+  new_multi_field = '''
+  { 
+    "posts" : {
+      "properties" : {
+        "tags" : {
+          "type" : "string",
+          "index" : "analyzed",
+          "fields" : {
+            "verbatim" : {
+              "type" : "string",
+              "index" : "not_analyzed"
+            }
+          }
+        }
+      }
+    }
+  }
+  '''
+  r = requests.put(url, data = new_multi_field)
+  print r.text
+#+END_SRC
+
+#+RESULTS:
+: {"acknowledged":true}
+
+Now if you want to perform a search where the tags are analyzed using
+the default analyzer (that lower-cases them and splits words), search
+using the "tags" property. However, if you would rather search for the
+full tag term, which may contain spaces, search using the
+"tags.verbatim" property.
+
+** 3.4 - Using Predefined Fields
+
+*** 3.4.1 - Controlling how to store and search for your documents
+
+Let's look at =_source= and =_all=.
+
+**** _source for storing the original contents
+
+This is a magic feature that you really never want to set to =false=.
+It's such a bad idea that the maintainers may actually take away
+the ability to set it to false in the future.
+
+**** Returning only some fields of the source document
+
+If you only want your search to return certain properties then specify
+that in your query like so:
+
+#+BEGIN_SRC python :exports both :results output :noweb yes
+  <<request_boilerplate>>
+  url = 'http://localhost:9200/get-together/group/1'
+  payload = {'pretty': True, 'fields': 'name'}
+  r = requests.get(url, params=payload)
+  print r.text
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+{
+  "_index" : "get-together",
+  "_type" : "group",
+  "_id" : "1",
+  "_version" : 1,
+  "found" : true,
+  "fields" : {
+    "name" : [ "Denver Clojure" ]
+  }
+}
+
+#+end_example
+
+**** _all for indexing everything
+
+=_source= is for storing everything and =_all= is for *indexing*
+everything. You can search against =_all= and Elasticsearch will
+return results regardless of which field matches.
+
+You can control whether a field is included in =_all= by setting
+the =include_in_all= param to =false=.
+
+*** 3.4.2 - Identifying your documents
+
+The =_uid= field is a combination of the =_id= and =_type= fields.
+
+The =_uid= field is stored in Lucene but =_id= and =_type= are not.
+They appear to be derived values. =_type= is in the index and uses
+the =not_analyzed= option.
+
+**** Providing ID's for your documents
+
+You can provide an id when creating a document that can be pretty
+much anything as long as it's unique, or you can let Elasticsearch do
+it by omitting the id value on creation.
+
+**** Storing the index name inside the document
+
+This doesn't seem to be useful enough to spend much time on.
+
+** 3.5 - Updating Existing Documents
+
+Here's what Elasticsearch does when you update a doc:
+
+1. Retrieves the doc
+2. "Applies the changes".
+   1. I think this means that it adds the doc to the index.
+3. The old version of the doc is removed
+4. The new doc is indexed in its place.
+
+*** 3.5.1 - Using the update API
+
+**** Sending a partial document
+
+You can send a partial document that only contains the values that you
+want to update. If the document doesn't exist then you'll get an
+error.
+
+It looks like this:
+
+#+BEGIN_SRC python :exports both :results output :noweb yes
+  <<request_boilerplate>>
+  url = 'http://localhost:9200/get-together/group/2/_update'
+  updated_property = '''
+  {
+    "doc" : {
+      "organizer" : "Roy"
+    }
+  }
+  '''
+  r = requests.post(url, data=updated_property)
+  print r.text
+#+END_SRC
+
+#+RESULTS:
+: {"_index":"get-together","_type":"group","_id":"2","_version":2}
+
+**** Creating documents that don't exist with upsert
+
+Basically, this allows you to add the properties that you expect to
+already be there if in fact they aren't. Here's an example:
+
+#+BEGIN_SRC python :exports both :results output :noweb yes
+  <<request_boilerplate>>
+  url = 'http://localhost:9200/get-together/group/2/_update'
+  updated_property = '''
+  {
+    "doc" : {
+      "organizer" : "Roy"
+    },
+    "upsert" : {
+      "name" : "Elasticsearch Denver",
+      "organizer" : "Roy"
+    }
+  }
+  '''
+  r = requests.post(url, data=updated_property)
+  print r.text
+#+END_SRC
+
+#+RESULTS:
+: {"_index":"get-together","_type":"group","_id":"2","_version":3}
+
+**** Updating documents with a script
+
+You use this if you want to send a "script" to the database to run
+instead of a literal document. This is turned off by default in my
+=elasticsearch.yml= file, so I updated it by setting
+=script.disable_dynamic= to =false=.
+
+Apparently you script with Groovy and they're compiled. Here's an 
+example. First, let's *add a shirt*:
+
+#+BEGIN_SRC python :exports both :results output :noweb yes
+  <<request_boilerplate>>
+  url = 'http://localhost:9200/online-shop/shirts/1'
+  new_doc = '''
+  {
+    "caption" : "Learning Elasticsearch",
+    "price" : 15
+  }
+  '''
+  r = requests.put(url, data=new_doc)
+  print r.text
+#+END_SRC
+
+#+RESULTS:
+: {"_index":"online-shop","_type":"shirts","_id":"1","_version":1,"created":true}
+
+Just for funzies, let's query that price:
+
+#+BEGIN_SRC python :exports both :results output :noweb yes
+  <<request_boilerplate>>
+  url = 'http://localhost:9200/online-shop/shirts/1'
+  payload = {'pretty': True }
+  r = requests.get(url, params=payload)
+  print r.text
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+{
+  "_index" : "online-shop",
+  "_type" : "shirts",
+  "_id" : "1",
+  "_version" : 1,
+  "found" : true,
+  "_source":
+{
+  "caption" : "Learning Elasticsearch",
+  "price" : 15
+}
+
+}
+
+#+end_example
+
+Great, now let's update the price using Groovy:
+
+#+BEGIN_SRC python :exports both :results output :noweb yes
+  <<request_boilerplate>>
+  url = 'http://localhost:9200/online-shop/shirts/1/_update'
+  updated_property = '''
+  {
+    "script" : "ctx._source.price += price_diff",
+    "params" : {
+      "price_diff" : 10
+    }
+  }
+  '''
+  r = requests.post(url, data=updated_property)
+  print r.text
+#+END_SRC
+
+#+RESULTS:
+: {"_index":"online-shop","_type":"shirts","_id":"1","_version":2}
+
+Jesus, I'm embedding Groovy in JSON in Python. This raises a few red
+flags :-)
+
+...and now let's confirm the update:
+
+Just for funzies, let's query that price:
+
+#+BEGIN_SRC python :exports both :results output :noweb yes
+  <<request_boilerplate>>
+  url = 'http://localhost:9200/online-shop/shirts/1'
+  payload = {'pretty': True }
+  r = requests.get(url, params=payload)
+  print r.text
+#+END_SRC
+
+#+RESULTS:
+: {
+:   "_index" : "online-shop",
+:   "_type" : "shirts",
+:   "_id" : "1",
+:   "_version" : 2,
+:   "found" : true,
+:   "_source":{"caption":"Learning Elasticsearch","price":25}
+: }
+: 
+
+*** 3.5.2 - Implementing concurrency control through versioning
+
+Figure 3.4 explains why you need versioning, but I'm confused.  In
+this example, you basically have a race condition where two requests
+are trying to update the same set of properties even though both
+requests only need to update one property. To me, the solution to this issue
+isn't additional functionality in the database. Instead, our requests
+should only be updating the properties that they need to update.
+
+Cool, let's test this in code. Since this code requires multiple
+processes or threads, it would be cumbersome to do it in Python.
+Instead, I'm going to use Bash + curl. Since I'm on Windows, this
+means that I'll have to run this code from a Cygwin terminal.
+
+#+BEGIN_SRC sh :exports both :results output
+  curl -XPOST 'localhost:9200/online-shop/shirts/1/_update' -d '{
+    "script": "Thread.sleep(10000); ctx._source.price = 2"
+  }' &
+
+  curl -XPOST 'localhost:9200/online-shop/shirts/1/_update' -d '{
+    "script": "ctx._source.caption = \"Knowing Elasticsearch\""
+  }'
+#+END_SRC
+
+#+RESULTS:
+: {"_index":"online-shop","_type":"shirts","_id":"1","_version":4}{"error":"VersionConflictEngineException[[online-shop][2] [shirts][1]: version conflict, current [4], provided [3]]","status":409}
+
+Ok, now I see that I was mistaken. The processes here are trying to
+update single, distinct properties. But by default Elasticsearch won't
+let the first operation occur if the second one completes first. This
+is an example of *optimistic* locking because the order of writes
+is not strictly enforced. *Pessimistic* locking is the opposite.
+
+**** Automatically retrying an update when there's a conflict
+
+You can ignore this default behavior by passing the
+=retry_on_conflict= param when updating.
+
+**** Using versions when you index documents
+
+Apparently you can also overwrite a version. I don't know how useful
+this would be.
+
+You can also set the version to whatever you want really by passing
+the following parms to your request:
+
+- =version=???=
+- =version_type=external=
+
+** 3.6 - Deleting Data
+
+*** 3.6.1 - Deleting documents
+
+**** Removing a single document
+
+#+BEGIN_SRC python :exports both :results output :noweb yes
+  <<request_boilerplate>>
+  url = 'http://localhost:9200/online-shop/shirts/1'
+  r = requests.delete(url)
+  print r.text
+#+END_SRC
+
+#+RESULTS:
+: {"found":true,"_index":"online-shop","_type":"shirts","_id":"1","_version":5}
+
+You can use the versioning API to help with deletes by adding the
+=version= param to this request.
+
+**** Removing a mapping type and documents matching a query.
+
+When you remove a type it removes all documents of that type. Here's
+an example:
+
+#+BEGIN_SRC python :exports both :results output :noweb yes
+  <<request_boilerplate>>
+  url = 'http://localhost:9200/online-shop/shirts'
+  r = requests.delete(url)
+  print r.text
+#+END_SRC
+
+#+RESULTS:
+: {"acknowledged":true}
+
+Since types are a abstraction built into Elasticsearch and not 
+Lucene the request above has to perform a query for all documents
+of that type. That's a bit slow.
+
+There's a *delete by query API* too. Here's an example:
+
+#+BEGIN_SRC python :exports both :results output :noweb yes
+  <<request_boilerplate>>
+  url = 'http://localhost:9200/get-together/_query'
+  payload = {'q': 'elasticsearch'}
+  r = requests.delete(url, params=payload)
+  print r.text
+#+END_SRC
+
+#+RESULTS:
+: {"_indices":{"get-together":{"_shards":{"total":2,"successful":2,"failed":0}}}}
+
+*** 3.6.2 - Deleting indicies
+
+Uses the same basic API as deleting a mapping.
+
+#+BEGIN_SRC python :exports both :results output :noweb yes
+  <<request_boilerplate>>
+  url = 'http://localhost:9200/get-together/'
+  r = requests.delete(url)
+  print r.text
+#+END_SRC
+
+#+RESULTS:
+: {"acknowledged":true}
+
+**** On segments and merging
+
+A segment is chunk of a Lucene index and an index is the same as a
+shard. Segments seem to be like blocks on a filesystem in that they're
+only deleted or overwritten when some sort of re-organizing job
+occurs. This is called *merging*. This sounds a lot lie GC to me
+in that it has to be managed based on your specific needs.
+
+*** 3.6.3 - Closing indices
+
+If you want to keep an index around just in case but not access it
+online you can *close* it instead of deleting it. 
+
+Here's how you close:
+
+#+BEGIN_SRC python :exports both :results output :noweb yes
+  <<request_boilerplate>>
+  url = 'http://localhost:9200/online-shop/_close'
+  r = requests.post(url)
+  print r.text
+#+END_SRC
+
+#+RESULTS:
+: {"acknowledged":true}
+
+Now let's open it:
+
+#+BEGIN_SRC python :exports both :results output :noweb yes
+  <<request_boilerplate>>
+  url = 'http://localhost:9200/online-shop/_open'
+  r = requests.post(url)
+  print r.text
+#+END_SRC
+
+#+RESULTS:
+: {"acknowledged":true}
+
+*** 3.6.4 - Re-indexing sample documents
+
+I have to now run the =populate.sh= script again to prep for
+chapter 4.

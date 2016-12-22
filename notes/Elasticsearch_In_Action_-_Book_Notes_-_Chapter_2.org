@@ -1,0 +1,330 @@
+#+SETUPFILE: static/org-html-themes/setup/theme-bigblow.setup
+#+TITLE: Elasticsearch In Action - Book Notes - Chapter 2
+
+* Navigation
+
+- [[file:Elasticsearch_In_Action_-_Book_Notes.org][Elasticsearch In Action - Book Notes]] (Top)
+- [[file:Elasticsearch_In_Action_-_Book_Notes_-_Chapter_1.org][Elasticsearch In Action - Book Notes - Chapter 1]] (Back)
+- [[file:Elasticsearch_In_Action_-_Book_Notes_-_Chapter_3.org][Elasticsearch In Action - Book Notes - Chapter 3]] (Forward)
+
+* Chapter 2 - Diving into the functionality
+
+We're going to start creating an Elasticsearch database that could
+be used with a Meetup-style app.
+
+Two angles of how data is organized in Elasticsearch:
+
+** Logical layout
+
+Oh wow, this is a lot like a document management system so far.
+The abstract unit of measurement is a *document*, which can be
+grouped into *types*. And then multiple types live in an *index*,
+which is analogous to a SQL database.
+
+This is a *lot* like FileNet:
+
+| Elasticsearch | FileNet         |
+|---------------+-----------------|
+| document      | document object |
+| type          | document class  |
+| index         | object store    |
+
+** Physical layout
+
+Each index is divided into *shards*. A single index can be split
+between multiple servers by distributing your shards. You can also
+store shard replicas.
+
+So in SQL terms, one "database" can be split among multiple hosts to
+improve disk IO. The backups for these database chunks are called
+*replicas*.
+
+** 2.1 - Understanding The Logical Layout: Documents, Types and Indices
+
+Each doc has an ID and is of a type which is stored in an index. Easy.
+This is called the *index-type-ID* combo.
+
+*** 2.1.1 - Documents
+
+Important properties:
+
+- *It's self-contained* - The doc contains the fields and their
+  values.
+  - Why on *earth* would you split these up?
+- *It can be hierarchical*
+- *It has a flexible structure* - Documents don't depend on a
+  predefined schema.
+
+Documents are usually JSON fragments. This is a bit of a surprise to
+me because I was under the impression that Elasticsearch also worked
+well for unstructured data. However, after a quick Google search I'm
+not seeing much about using Elasticsearch to index unstructured text.
+
+Single properties can store multiple values or objects.
+
+You can add or delete fields at will using Elasticsearch but the *data
+type of the field matters*.
+
+*** 2.1.2 - Types
+
+You can add or remove fields very easily but the data types are harder
+to change.
+
+*** 2.1.3 - Indices
+
+Each index has its own *refresh_interval*, which is the interval at
+which newly indexed documents are made available for searches. By
+default this is 1 second.
+
+** 2.2 - Understanding The Physical Layout: Nodes And Shards
+
+By default, when you create a new index you're creating the following:
+
+- 5 primary shards
+- 1 replica of each primary shard
+
+*** 2.2.1 - Creating a cluster of one or more nodes
+
+A *node* is just an Elasticsearch process. 
+
+Your app can connect to any node in an Elasticsearch cluster in a
+transparent way, like it's accessing a single node.
+
+Replicas can be used in two ways:
+
+- As "primaries" if the primary shard does disappear.
+- As a "cache" of a primary shard if that improves searches
+  - For example, if you have P1 and R2 on the same server and a search
+    spans P1 and P2, then the search will use P1 and R2 because
+    they're closer to each other, which will improve performance.
+
+*** 2.2.2 - Understanding primary and replica shards
+
+A shard is a Lucene index, which is a directory of files containing
+an inverted index.
+
+Replicas can be added or removed at runtime - primaries can't.
+
+*** 2.2.3 - Distributing shards in a cluster
+
+When you add more nodes to the same cluster existing shards get
+balanced between all nodes.
+
+*** 2.2.4 - Distributed indexing and searching
+
+How *indexing* works with multiple shards:
+
+- The "receiving node" receives a doc and an indexing request.
+- This node selects the "target shard", and distribution should be
+  evenly distributed.
+- The receiving node then forwards the document to the node that houses the target shard.
+- It is indexed.
+- The indexing operations is replayed by all of the replicas of that
+  shard.
+- The indexing command successfully returns after the replicas finish
+  indexing the document.
+
+Here's how *searching* works:
+
+- The "receiving node" forwards the request to a set of shards
+  (primaries and replicas) containing the data.
+- Elasticsearch uses round-robin to select the available shard and
+  forwards the request to that node.
+- Elasticsearch then gathers the results, aggregates them if
+  necessary, and responds to the client.
+
+** 2.3 - Indexing New Data
+
+Anatomy of the document URI:
+
+- =http://<Elasticsearch-host>:9200/<index-name>/<type-name>/<document-id>=
+
+*** 2.3.1 - Indexing a document with cUrl
+
+I was having a little problem with =curl= on my Windows 7 system, 
+but I was able to get the first example to work in Powershell with
+the =invoke-restmethod= command. Here's what I did:
+
+#+BEGIN_EXAMPLE
+
+C:\ [master]> invoke-restmethod -Uri 'http://localhost:9200/get-together/group/1?pretty' -Method Put -Body '{"name": "Elasticsearch Denver", "organizer": "Lee" }'
+
+
+_index   : get-together
+_type    : group
+_id      : 1
+_version : 1
+created  : True
+
+#+END_EXAMPLE
+
+Cool! Here's what I saw in the logs after running that command:
+
+#+BEGIN_EXAMPLE
+[2016-11-30 14:28:26,688][INFO ][cluster.metadata         ] [Blindspot] [get-together] creating index, cause [auto(index api)], templates [], shards [5]/[1], mappings [group]
+[2016-11-30 14:28:27,138][INFO ][cluster.metadata         ] [Blindspot] [get-together] update_mapping [group] (dynamic)
+#+END_EXAMPLE
+
+Cool, and here's my shards:
+
+#+BEGIN_EXAMPLE
+
+C:\Users\tom\Documents\td\apps\elasticsearch-1.7.6\data\elasticsearch\nodes\0\indices\get-t
+ogether> dir
+
+
+    Directory: C:\Users\tom\Documents\td\apps\elasticsearch-1.7.6\data\elasticsearch\nodes
+    \0\indices\get-together
+
+
+Mode                LastWriteTime     Length Name
+----                -------------     ------ ----
+d----        11/30/2016   2:28 PM            0
+d----        11/30/2016   2:28 PM            1
+d----        11/30/2016   2:28 PM            2
+d----        11/30/2016   2:28 PM            3
+d----        11/30/2016   2:28 PM            4
+d----        11/30/2016   2:28 PM            _state
+
+#+END_EXAMPLE
+
+*** 2.3.2 - Creating an index and mapping type
+
+Elasticsearch creating the index and mapping automatically when we
+added the first document. 
+
+You can use a url like the following to view your mapping:
+
+- =http://<host>:9200/<index>/_mapping/<type>?pretty=
+
+*** 2.3.3 - Indexing documents from the code samples
+
+Just run the script :-)
+
+** 2.4 - Searching for and retrieving data
+
+Example:
+
+#+BEGIN_SRC sh :exports both :results code
+
+curl 'http://localhost:9200/get-together/_mapping/group?pretty'
+
+#+END_SRC
+
+*** 2.4.1 - Where to search
+
+You can tell Elasticsearch to search something very specific or
+give it very broad criteria.
+
+*** 2.4.2 - Contents of the reply
+
+The response contains lots of stats too.
+
+**** Time
+
+You query will only return the results that it gathers before the 
+timeout has been reached.
+
+**** Shards
+
+The Elasticsearch results will tell you if any shards are unavailable.
+
+**** Hit statistics
+
+=max_score= tells you the maximum score of the matching documents.
+
+**** Resulting documents
+
+The array of document objects.
+
+*** 2.4.3 - How to search
+
+Normally you don't make URI requests, you PUT JSON.
+
+**** Setting query string options
+
+You can set fields like =default_field= and =default_operator=
+as properties of your query.
+
+**** Choosing the right query type
+
+Term queries can be faster and more straightforward but the author
+hasn't yet explained why.
+
+**** Using filters
+
+If you're not interested in a document's relevancy score you can run a
+*filtered query*, which only cares whether a result matches a search
+or not.
+
+**** Applying aggregations
+
+Can aggregate data based on one or more properties.
+
+*** 2.4.4 - Getting documents by ID
+
+Yup, you can do this too :-) 
+
+** 2.5 - Configuring Elasticsearch 
+
+*** 2.5.1 - Specifying a cluster name in elasticsearch.yml
+
+Simply change the =cluster.name= value and then re-add your data.
+
+*** 2.5.2 - Specifying verbose logging via logging.yml
+
+Uses log4j. 
+
+*** 2.5.3 - Adjusting JVM settings
+
+Can be changed by editing the =bin\elasticsearch.in.bat= file.
+
+** 2.6 - Adding Nodes To The Cluster
+
+First, I think =kopf= is a nice frontend. Here's how I installed
+it. First, I set the HTTPS proxy settings in the =plugin.bat= file.
+Next, I ran this command:
+
+
+#+BEGIN_EXAMPLE
+
+.\plugin.bat install lmenezes/elasticsearch-kopf/1.0
+
+#+END_EXAMPLE
+
+...and now I can see lots of great information about my database using
+the following URL:
+
+- http://localhost:9200/_plugin/kopf
+
+*** 2.6.1 - Starting a second node
+
+You can just start the Elasticsearch process again from a different
+terminal window and it will automatically start with different
+listening port numbers. That's so cool! It's also a good reason to
+test the app from the zip file, not from an "official" distribution.
+
+Another cool thing is when you start the second process it will take
+your replicas and host them on that "node". Before you start the 
+second process the replicas aren't hosted.
+
+I *love* that sharding and clustering are built into the system, 
+that they're recognized as modern requirements for *any* datastore.
+
+*** 2.6.2 - Adding additional nodes
+
+Let's try a third node! Now my replicas and primaries are distributed
+even more. Here's what I can do to scale now:
+
+- Change the number of replicas
+  - Can be done on the fly
+  - Increases the number of *concurrent searches*
+  - Does *not* improve performance of:
+    - indexing
+    - "isolated" searches
+- Add shards
+  - Requires re-indexing, can't be done of the fly.
+  - Note: I wonder how the re-indexing process occurs. This appears to
+    be expensive.
+- Add more indices
+  - E.g. if storing logs add a store them in a new daily index.

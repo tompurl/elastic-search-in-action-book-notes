@@ -1,0 +1,330 @@
+#+SETUPFILE: static/org-html-themes/setup/theme-bigblow.setup
+#+TITLE: Elasticsearch In Action - Book Notes - Chapter 11
+#+PROPERTY: header-args :eval never-export :exports code
+
+* Navigation
+
+- [[file:Elasticsearch_In_Action_-_Book_Notes.org][Elasticsearch In Action - Book Notes]] (Top)
+- [[file:Elasticsearch_In_Action_-_Book_Notes_-_Chapter_10.org][Elasticsearch In Action - Book Notes - Chapter 10]] (Back)
+
+* Boilerplate Code
+
+Please see the [[file:Elasticsearch_In_Action_-_Book_Notes_-_Chapter_3.org::*Notes%20On%20Code%20Examples][Notes On Code Examples]] section in Chapter 3 for
+more information.
+
+#+name: request_boilerplate
+#+BEGIN_SRC python
+import os, requests
+os.environ['NO_PROXY'] = 'localhost'
+
+#+END_SRC
+
+* Chapter 11 - Administering your cluster
+
+** 11.1 - Improving Defaults
+
+*** 11.1.1 - Index templates
+
+**** Creating a template
+
+An index template is an automated way of creating an index and some of
+it's mappings. 
+
+Templates can be automatically applied based on the name of the index.
+
+There's a lot of great information here but not much that I think I
+will use in the short term. I'll have to come back later.
+
+*** 11.1.2 - Default mappings
+
+You can specify a mapping that is the default of every type across
+indexes.
+
+Default maps do not behave retroactively.
+
+** 11.2 - Allocation Awareness
+
+*Allocation awareness* is when you tell your cluster where to place
+your replicas.
+
+*** 11.2.1 - Shard-based allocation
+
+This is very cool. You can tell Elasticsearch where each node is
+located and it will intelligently store your shards as a result. For
+example, you wouldn't necessarily want the primary and replica copy of
+a shard to be in the same physical rack. If you set a few properties
+then Elasticsearch will ensure that the replica is placed in a
+different rack from the primary.
+
+*** 11.2.2 - Forced allocation awareness
+
+This seems very similar to 11.2.1, except is based on AWS zones
+instaead of racks.
+
+** 11.3 - Monitoring For Bottlenecks
+
+*** 11.3.1 - Checking cluster health
+
+We've been through this already.
+
+*** 11.3.2 - CPU: slow logs, hot threads, and thread pools
+
+**** Slow logs
+
+You can turn on the following logs:
+
+- slow query
+- slow index
+
+Here's an example config:
+
+#+BEGIN_EXAMPLE
+
+index.search.slowlog.threshold.query.warn: 10s
+index.search.slowlog.threshold.query.info: 1s
+index.search.slowlog.threshold.query.debug: 2s
+index.search.slowlog.threshold.query.trace: 500ms
+
+index.search.slowlog.threshold.fetch.warn: 1s
+index.search.slowlog.threshold.fetch.info: 1s
+index.search.slowlog.threshold.fetch.debug: 500ms
+index.search.slowlog.threshold.fetch.trace: 200ms
+
+#+END_EXAMPLE
+
+**** hot_threads API
+
+Returns a list of blocked threads for every node in your cluster:
+
+#+BEGIN_SRC python :exports both :results output :noweb yes
+  <<request_boilerplate>>
+  url = 'http://localhost:9200/_nodes/hot_threads'
+  r = requests.get(url)
+  print r.text 
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+::: [Reeva Payge][hzytIrXxRR6iBQdSUTV0cw][PAM][inet[/127.0.0.1:9301]]
+   Hot threads at 2016-12-20T17:08:54.094Z, interval=500ms, busiestThreads=3, ignoreIdleThreads=true:
+   
+    0.0% (0s out of 500ms) cpu usage by thread 'Attach Listener'
+     unique snapshot
+     unique snapshot
+     unique snapshot
+     unique snapshot
+     unique snapshot
+     unique snapshot
+     unique snapshot
+     unique snapshot
+     unique snapshot
+     unique snapshot
+
+::: [Vibro][pu-uhNtGT9eYyJwtz_OAtQ][PAM][inet[/127.0.0.1:9300]]
+   Hot threads at 2016-12-20T17:08:54.094Z, interval=500ms, busiestThreads=3, ignoreIdleThreads=true:
+   
+    0.0% (0s out of 500ms) cpu usage by thread 'Attach Listener'
+     unique snapshot
+     unique snapshot
+     unique snapshot
+     unique snapshot
+     unique snapshot
+     unique snapshot
+     unique snapshot
+     unique snapshot
+     unique snapshot
+     unique snapshot
+
+::: [Agatha Harkness][YdGYxur6RR6HN005axVVXQ][PAM][inet[/127.0.0.1:9302]]
+   Hot threads at 2016-12-20T17:08:54.094Z, interval=500ms, busiestThreads=3, ignoreIdleThreads=true:
+   
+    0.0% (0s out of 500ms) cpu usage by thread 'Attach Listener'
+     unique snapshot
+     unique snapshot
+     unique snapshot
+     unique snapshot
+     unique snapshot
+     unique snapshot
+     unique snapshot
+     unique snapshot
+     unique snapshot
+     unique snapshot
+
+
+#+end_example
+
+**** Thread Pools
+
+Elasticsearch gives you fine-tuned control over how threads are 
+allocated. Thread pools are defined by operation:
+
+- bulk
+- index
+- search
+
+*** 11.3.3 - Memory: heap size, field, and filter caches
+
+**** Heap size
+
+The author's playing a bit loose with GC.
+
+Good rules of thumb for allocating heap:
+
+- Don't allocate more than half of your VM's RAM
+  - Lucene stores a lot of document in RAM so want to have some left
+    over.
+- Don't use more than 32 GB or RAM
+  - ...for some weird java reason.
+
+There is a lot of caching done by Elasticsearch by default. You need
+to tune these values on a real prod system.
+
+*** 11.3.4 - OS Caches
+
+Lucene stores a lot of content in OS file-system caches. This can
+use up a lot of RAM.
+
+It can help performance by storing hot indexes on your fastest 
+machines. You can do this by first =tag=ging each node and then
+adding those tags to a routing table.
+
+*** 11.3.5 - Store throttling
+
+You can throttle disk IO operations if necessary.
+
+** 11.4 - Backing up your data
+
+*** 11.4.1 - Snapshot API
+
+- Nonblocking
+- Incremental
+
+Stored in a *repository*, which is either:
+
+- A shared file system that's available to every node in the cluster
+- A read-only URL repo
+
+*** 11.4.2 - Backing up data to a shared file system
+
+Let's define it first. I'm going to use the following location:
+
+- =d:/myshare/tom/Elasticsearch-test/snapshots=
+
+Here's something that was missing from the docs but available 
+[[https://www.elastic.co/guide/en/elasticsearch/reference/current/modules-snapshots.html#_shared_file_system_repository][here]]. First I had to add the following to =elasticsearch.yml=:
+
+#+BEGIN_EXAMPLE
+
+path.repo: ["d:/myshare/tom/Elasticsearch-test"]
+
+#+END_EXAMPLE
+
+I then ran the example from the book to create the repo:
+
+#+BEGIN_SRC python :exports both :results output :noweb yes
+  <<request_boilerplate>>
+  url = 'http://localhost:9200/_snapshot/my_repository'
+  define_new_backup_repo = '''
+  {
+    "type" : "fs",
+    "settings" : {
+      "location" : "d:/myshare/tom/Elasticsearch-test/snapshots",
+      "compress" : true,
+      "max_snapshot_bytes_per_sec" : "20mb",
+      "max_restore_bytes_per_sec" : "20mb"
+    }
+  }
+  '''
+  r = requests.put(url, data = define_new_backup_repo)
+  print r.text 
+#+END_SRC
+
+#+RESULTS:
+: {"acknowledged":true}
+
+Now let's make sure it exists:
+
+#+BEGIN_SRC python :exports both :results output :noweb yes
+  <<request_boilerplate>>
+  url = 'http://localhost:9200/_snapshot/my_repository'
+  payload = {'pretty': True}
+  r = requests.get(url, params = payload)
+  print r.text 
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+{
+  "my_repository" : {
+    "type" : "fs",
+    "settings" : {
+      "compress" : "true",
+      "max_restore_bytes_per_sec" : "20mb",
+      "location" : "d:/myshare/tom/Elasticsearch-test/snapshots",
+      "max_snapshot_bytes_per_sec" : "20mb"
+    }
+  }
+}
+
+#+end_example
+
+Ok, let's create a backup:
+
+#+BEGIN_SRC python :exports both :results output :noweb yes
+  <<request_boilerplate>>
+  url = 'http://localhost:9200/_snapshot/my_repository/first_snapshot'
+  r = requests.put(url)
+  print r.text 
+#+END_SRC
+
+#+RESULTS:
+: {"accepted":true}
+
+If you want the request to block until it's done then add the
+=wait_for_completion=true= param to that request.
+
+How about a second snapshot?
+
+#+BEGIN_SRC python :exports both :results output :noweb yes
+  <<request_boilerplate>>
+  url = 'http://localhost:9200/_snapshot/my_repository/second_snapshot'
+  payload = {"wait_for_completion": True}
+  r = requests.put(url, params = payload)
+  print r.text 
+#+END_SRC
+
+#+RESULTS:
+: {"snapshot":{"snapshot":"second_snapshot","version_id":1070699,"version":"1.7.6","indices":["myindex","get-together","november_2014_invoices","december_2014_invoices"],"state":"SUCCESS","start_time":"2016-12-20T20:24:01.097Z","start_time_in_millis":1482265441097,"end_time":"2016-12-20T20:24:08.180Z","end_time_in_millis":1482265448180,"duration_in_millis":7083,"failures":[],"shards":{"total":17,"failed":0,"successful":17}}}
+
+You can also backup individual snapshots.
+
+You should use the API when deleting snapshots:
+
+#+BEGIN_SRC python :exports both :results output :noweb yes
+  <<request_boilerplate>>
+  url = 'http://localhost:9200/_snapshot/my_repository/first_snapshot'
+  r = requests.delete(url)
+  print r.text 
+#+END_SRC
+
+#+RESULTS:
+: {"acknowledged":true}
+
+*** 11.4.3 - Restoring from backups
+
+This section kindof plays fast and loose with all of the steps
+required to restore from a backup, so I'm going to include a concrete
+example.
+
+All you have to do is follow the [[file:Elasticsearch_In_Action_-_Book_Notes.org::*Restore][Restore]] steps from the [[file:Elasticsearch_In_Action_-_Book_Notes.org::*Backups%20(Optional)][Backups]]
+section of the [[file:Elasticsearch_In_Action_-_Book_Notes.org][TOC]]. For the snapshot name choose =second_snapshot=
+(assuming you haven't deleted it yet).
+
+*** 11.4.4 - Using repository plugins
+
+If you don't want to use SMB or NFS as your repository protocol then
+you have a few other options.
+
+- Amazon S3
+- Hadoop HDFS
+
